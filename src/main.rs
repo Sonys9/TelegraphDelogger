@@ -1,95 +1,65 @@
-use std::io::stdin;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
-use std::io::Write;
-use std::fs::OpenOptions;
-use serde_json::{Result, Value};
+use teloxide::prelude::*;
 
-fn open_from_file() -> HashMap<String, String> {
-    let file = File::open("todo.json");
-
-    if let Ok(mut f) = file {
-        let mut content = String::new();
-        f.read_to_string(&mut content).expect("Cant read the file!");
-        let v = serde_json::from_str(content.as_str()).expect("Cant parse the file!");
-        return v;
-    }
-
-    let mut f = File::create("todo.json").expect("Cant create the file!");
-    f.write_all(b"{}").expect("Cant write in the file!");
-    HashMap::new()
+async fn send_request(link: String) -> Result<String, reqwest::Error> {
+    let mut url = String::new(); // делаем пустую строку
+    if !link.starts_with("https://") {
+        url = format!("https://{}", &link); // добавляем https:// к исходной ссылке
+    } else if link.starts_with("http://") {
+        url = format!("https://{}", &link[6..].to_string()); // добавляем https:// к исходной ссылке
+    } else { url = link; };
+    let body = reqwest::get(url) // делаем запрос
+        .await?
+        .text()
+        .await?;
+    Ok(body) // возвращаем ответ (код страницы)
 }
 
-fn get_todos() {
-    let mut dict: HashMap<String, String> = open_from_file();
-    for (name, value) in dict {
-        println!("[{value}] {name}");
-    };
-}
+const BAD_LINKS: [&str; 16] = [ // плохие ссылки с логгером (16 штук, статичный список)
+    "iplogger.org",
+    "wl.gl",
+    "ed.tc",
+    "bc.ax",
+    "iplogger.com",
+    "maper.info",
+    "iplogger.ru",
+    "2no.co",
+    "yip.su",
+    "iplogger.info",
+    "iplis.ru",
+    "ezstat.ru",
+    "iplog.co",
+    "iplogger.cn",
+    "grabify.link",
+    "hueglotik.lol"
+];
 
-fn update_todo(dict: &HashMap<String, String>)  {
-    let mut f = File::create("todo.json").expect("Cant create the file!");
-    let in_str_data = serde_json::to_string(&dict).expect("Cant parse JSON data!");
-    f.write_all(in_str_data.as_bytes()).expect("Cant write in the file!");
-}
+#[tokio::main]
+async fn main() {
+    let bot = Bot::new("").auto_send(); // инициализируем бота
 
-//#[tokio::main]
-fn main() {
-    
-    get_todos();
+    teloxide::repl(bot, |message: Message, bot: AutoSend<Bot>| async move { // хендлер при сообщениях
 
-    println!("Simple TODO in Rust!");
-    loop {
-        let mut dict: HashMap<String, String> = open_from_file();
-
-        println!("[1] Add new target\n[2] Delete old target\n[3] Show TODO\n[4] Change TODO status\nEnter choice number:\t");
-        let mut user_input = String::new();
-        let _ = stdin().read_line(&mut user_input);
-
-        if user_input.trim() == String::from("1") {
-            println!("Enter TODO:\t");
-            let mut user_input = String::new();
-            let _ = stdin().read_line(&mut user_input);
-            if user_input.trim() != "" {
-                dict.insert(user_input.trim().to_string(), "Undone".to_string());
-            };
-            update_todo(&dict);
-        } else if user_input.trim() == String::from("2") {
-            println!("Enter TODO:\t");
-            let mut user_input = String::new();
-            let _ = stdin().read_line(&mut user_input);
-            if user_input.trim() != "" {
-                match &dict.contains_key(user_input.trim()) {
-                    true => {
-                        &dict.remove(user_input.trim());
-                        println!("Removed successful");
-                    },
-                    false => println!("Element is not found")
+        // треугольник 
+        if let Some(text) = message.text() {
+            for word in text.split_whitespace() { // раздробляем по пробелам строку на список
+                if word.starts_with("telegra.ph") || word.starts_with("https://telegra.ph") || word.starts_with("http://telegra.ph") { // проверка на наличие telegra.ph в сообщении
+                    let _ = bot.send_message(message.chat.id, "⌛️ Проверяем telegraph статью на Logger").reply_to_message_id(message.id).await;
+                    if let Ok(str) = send_request(word.to_string()).await { // получаем исходный код страницы
+                        let re = regex::Regex::new(r#"<img src="([^"]+)""#).unwrap(); // ищет картинки
+                        for cap in re.captures_iter(str.as_str()) {
+                            for link in &BAD_LINKS {
+                                if cap[1].contains(link) { // перебираем плохие ссылки и ищем соответствие
+                                    let _ = bot.send_message(message.chat.id, "❌ Telegraph статья содержит Logger").reply_to_message_id(message.id).await;
+                                    let _ = bot.delete_message(message.chat.id, message.id).await;
+                                    return respond(());
+                                };
+                            };
+                        };
+                        let _ = bot.send_message(message.chat.id, "✅ Telegraph статья не содержит Logger").reply_to_message_id(message.id).await;
+                    } else { let _ = bot.send_message(message.chat.id, "❌ Не удалось проверить telegraph статью на Logger").reply_to_message_id(message.id).await;  }
                 };
             };
-            update_todo(&dict);
-        } else if user_input.trim() == String::from("3") {
-            for (name, status) in &dict {
-                println!("[{}] {}", status, name);
-            }
-        } else if user_input.trim() == String::from("4") {
-            println!("Enter TODO:\t");
-            let mut user_input = String::new();
-            let _ = stdin().read_line(&mut user_input);
-            if user_input.trim() != "" {
-                match &dict.contains_key(user_input.trim()) {
-                    true => {
-                        if dict[user_input.trim()] == "Done" {
-                            dict.insert(user_input.trim().to_string(), "Undone".to_string());
-                        } else {
-                            dict.insert(user_input.trim().to_string(), "Done".to_string());
-                        }
-                    },
-                    false => println!("Element is not found")
-                };
-            }; 
-            update_todo(&dict);
         };
-    }
+        respond(())
+    }).await;
 }
