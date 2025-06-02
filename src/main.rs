@@ -2,10 +2,10 @@ use teloxide::prelude::*;
 
 async fn send_request(link: String) -> Result<String, reqwest::Error> {
     let mut url = String::new(); // делаем пустую строку
-    if !link.starts_with("https://") {
+    if !link.starts_with("https://") && !link.starts_with("http://") {
         url = format!("https://{}", &link); // добавляем https:// к исходной ссылке
     } else if link.starts_with("http://") {
-        url = format!("https://{}", &link[6..].to_string()); // добавляем https:// к исходной ссылке
+        url = format!("https://{}", &link[7..]); // добавляем https:// к исходной ссылке
     } else { url = link; };
     let body = reqwest::get(url) // делаем запрос
         .await?
